@@ -98,6 +98,7 @@ struct FlasherApp {
     drag: DragState,
     last_frame: Instant,
     cursor_pos: (f64, f64),
+    init_attempted: bool,
 }
 
 impl FlasherApp {
@@ -112,20 +113,24 @@ impl FlasherApp {
             drag: DragState::default(),
             last_frame: Instant::now(),
             cursor_pos: (0.0, 0.0),
+            init_attempted: false,
         }
     }
 }
 
-impl ApplicationHandler for FlasherApp {
-    fn resumed(&mut self, el: &ActiveEventLoop) {
-        let win = el.create_window(
+impl FlasherApp {
+    fn init_wgpu(&mut self, el: &ActiveEventLoop) {
+        let win = match el.create_window(
             Window::default_attributes()
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_inner_size(LogicalSize::new(980.0, 680.0))
                 .with_min_inner_size(LogicalSize::new(MIN_W as f64, MIN_H as f64))
                 .with_title("flasher")
-        ).unwrap();
+        ) {
+            Ok(w) => w,
+            Err(e) => { eprintln!("create_window: {e}"); return; }
+        };
 
         let arc_win = Arc::new(win);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -147,6 +152,12 @@ impl ApplicationHandler for FlasherApp {
         self.wgpu_state = Some(state);
         self.platform = Some(platform);
         self.renderer = Some(renderer);
+    }
+}
+
+impl ApplicationHandler for FlasherApp {
+    fn resumed(&mut self, el: &ActiveEventLoop) {
+        self.init_wgpu(el);
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
@@ -232,7 +243,7 @@ impl ApplicationHandler for FlasherApp {
                     window.request_redraw();
                     return;
                 }
-                let state = self.wgpu_state.as_ref().unwrap();
+                let state = self.wgpu_state.as_mut().unwrap();
                 let platform = self.platform.as_mut().unwrap();
                 let renderer = self.renderer.as_mut().unwrap();
 
@@ -243,11 +254,28 @@ impl ApplicationHandler for FlasherApp {
                 let surface_texture = match current {
                     wgpu::CurrentSurfaceTexture::Success(t) => t,
                     wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-                    wgpu::CurrentSurfaceTexture::Timeout => {
+                    wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                         window.request_redraw();
                         return;
                     }
-                    _ => return,
+                    wgpu::CurrentSurfaceTexture::Outdated => {
+                        let size = window.inner_size();
+                        state.resize(size.width, size.height);
+                        window.request_redraw();
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Lost => {
+                        let size = window.inner_size();
+                        state.resize(size.width, size.height);
+                        window.request_redraw();
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Validation => {
+                        let size = window.inner_size();
+                        state.resize(size.width, size.height);
+                        window.request_redraw();
+                        return;
+                    }
                 };
 
                 let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -297,7 +325,11 @@ impl ApplicationHandler for FlasherApp {
         }
     }
 
-    fn about_to_wait(&mut self, _el: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if self.window.is_none() && !self.init_attempted {
+            self.init_attempted = true;
+            self.init_wgpu(el);
+        }
         if let Some(ref window) = self.window {
             window.request_redraw();
         }
