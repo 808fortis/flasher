@@ -164,20 +164,24 @@ fn parse_xml(path: &Path) -> Result<Scatter> {
             if tag_stack.last().map(|s| s == &tag_name).unwrap_or(false) {
                 tag_stack.pop();
             }
-        } else if !tag.ends_with('/') {
-            let tag_parts: Vec<&str> = tag.split_whitespace().collect();
+        } else {
+            let self_closing = tag.ends_with('/');
+            let tag_content = if self_closing { &tag[..tag.len() - 1] } else { tag };
+            let tag_parts: Vec<&str> = tag_content.split_whitespace().collect();
             let tag_name = tag_parts[0].to_lowercase();
-            tag_stack.push(tag_name.clone());
+            if !self_closing { tag_stack.push(tag_name.clone()); }
 
-            let rest = tag[tag_parts[0].len()..].trim();
+            let rest = tag_content[tag_parts[0].len()..].trim();
             let mut attrs = HashMap::new();
             let mut pos = 0;
             while pos < rest.len() {
                 while pos < rest.len() && rest.as_bytes()[pos] == b' ' { pos += 1; }
                 if pos >= rest.len() { break; }
                 let eq = pos + rest[pos..].find('=').unwrap_or(rest.len() - pos);
-                let key = rest[pos..eq].trim().trim_matches('"').to_lowercase();
+                let key = rest[pos..eq].trim().to_lowercase();
+                if key.is_empty() { break; }
                 pos = eq + 1;
+                while pos < rest.len() && rest.as_bytes()[pos] == b' ' { pos += 1; }
                 if pos >= rest.len() || rest.as_bytes()[pos] != b'"' { break; }
                 pos += 1;
                 let end = pos + rest[pos..].find('"').unwrap_or(rest.len() - pos);
@@ -194,6 +198,13 @@ fn parse_xml(path: &Path) -> Result<Scatter> {
                 "partition" => {
                     in_partition = true;
                     for (k, v) in attrs { current.insert(k, v); }
+                    if self_closing {
+                        if let Some(part) = build_partition(&current, partitions.len() as u32) {
+                            partitions.push(part);
+                        }
+                        current.clear();
+                        in_partition = false;
+                    }
                 }
                 _ => {}
             }
