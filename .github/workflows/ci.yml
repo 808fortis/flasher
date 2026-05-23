@@ -30,3 +30,11 @@ jobs:
       run: cargo check
     - name: Clippy
       run: cargo clippy -- -D clippy::all
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: flasher-${{ matrix.os }}
+        path: |
+          target/release/flasher
+          target/release/flasher.exe
+        if-no-files-found: warn
