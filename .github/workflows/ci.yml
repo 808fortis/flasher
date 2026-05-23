@@ -18,6 +18,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
     - name: Install Linux deps
       if: matrix.os == 'ubuntu-latest'
       run: sudo apt-get update && sudo apt-get install -y libudev-dev
