@@ -46,6 +46,7 @@ pub struct FastbootSession {
     handle: DeviceHandle<GlobalContext>,
     out_ep: u8,
     in_ep: u8,
+    #[allow(dead_code)]
     interface: u8,
 }
 
@@ -218,6 +219,7 @@ impl FastbootSession {
         self.getvar("slot-count").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(1)
     }
 
+    #[allow(dead_code)]
     pub fn get_max_download_size(&self) -> usize {
         self.getvar("max-download-size").ok()
             .and_then(|v| usize::from_str_radix(v.trim(), 16).ok())
@@ -258,6 +260,7 @@ impl FastbootSession {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn erase(&self, partition: &str) -> Result<()> {
         self.command(&format!("erase:{}", partition)).map(|_| ())
     }
@@ -267,6 +270,7 @@ impl FastbootSession {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn backup_partitions(&self, partitions: &[String], base_path: &Path) -> Result<()> {
         fs::create_dir_all(base_path)?;
         for name in partitions {
@@ -283,6 +287,7 @@ impl FastbootSession {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn read_partition_raw(&self, name: &str) -> Result<Vec<u8>> {
         let size_str = self.getvar(&format!("partition-size:{}", name))?;
         let size = usize::from_str_radix(size_str.trim(), 16).map_err(|_| Error::Protocol("bad partition-size".to_string()))?;

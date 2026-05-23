@@ -81,6 +81,7 @@ impl App {
         self.log.push(LogEntry { text, level });
     }
 
+    #[allow(dead_code)]
     fn drain_flash_log(&mut self) {
         let mut flash_log = self.flash_log.lock().unwrap();
         for msg in flash_log.drain(..) {

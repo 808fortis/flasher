@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Partition {
     pub enabled: bool,
     pub name: String,
@@ -14,6 +15,7 @@ pub struct Partition {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Scatter {
     pub partitions: Vec<Partition>,
     pub platform: String,
@@ -22,6 +24,7 @@ pub struct Scatter {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Error {
     Io(std::io::Error),
     Parse(String),
