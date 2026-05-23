@@ -157,7 +157,10 @@ impl FlasherApp {
 
 impl ApplicationHandler for FlasherApp {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        self.init_wgpu(el);
+        if !self.init_attempted {
+            self.init_attempted = true;
+            self.init_wgpu(el);
+        }
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
@@ -326,7 +329,7 @@ impl ApplicationHandler for FlasherApp {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        if self.window.is_none() && !self.init_attempted {
+        if !self.init_attempted {
             self.init_attempted = true;
             self.init_wgpu(el);
         }
