@@ -60,12 +60,20 @@ fn parse_int(s: &str) -> Result<u64> {
     }
 }
 
+fn first_of<'a>(map: &'a HashMap<String, String>, keys: &[&str]) -> Option<&'a String> {
+    keys.iter().find_map(|k| map.get(*k))
+}
+
 fn build_partition(map: &HashMap<String, String>, idx: u32) -> Option<Partition> {
-    let name = map.get("name")?.clone();
-    let filename = map.get("filename").cloned().unwrap_or_else(|| format!("{}.img", name));
-    let linear_start_addr = map.get("linear_start_addr").and_then(|s| parse_int(s).ok()).unwrap_or(0);
-    let partition_size = map.get("partition_size").and_then(|s| parse_int(s).ok()).unwrap_or(0);
-    let physical_start_addr = map.get("physical_start_addr").and_then(|s| parse_int(s).ok()).unwrap_or(0);
+    let name = first_of(map, &["name", "partition_name", "partition"])?.clone();
+    let filename = first_of(map, &["filename", "file_name", "file"]).cloned()
+        .unwrap_or_else(|| format!("{}.img", name));
+    let linear_start_addr = first_of(map, &["linear_start_addr", "begin_addr", "start_addr", "linear_start_address"])
+        .and_then(|s| parse_int(s).ok()).unwrap_or(0);
+    let partition_size = first_of(map, &["partition_size", "size", "partition_size_"])
+        .and_then(|s| parse_int(s).ok()).unwrap_or(0);
+    let physical_start_addr = first_of(map, &["physical_start_addr", "physical_addr", "physical_start_address"])
+        .and_then(|s| parse_int(s).ok()).unwrap_or(0);
     Some(Partition {
         enabled: true,
         name,
