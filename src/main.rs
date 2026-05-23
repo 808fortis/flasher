@@ -72,7 +72,7 @@ impl WgpuState {
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
-            force_fallback_adapter: true,
+            force_fallback_adapter: false,
         }).await.ok()?;
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.ok()?;
         let mut config = surface.get_default_config(&adapter, size.width, size.height)?;
@@ -228,9 +228,13 @@ impl ApplicationHandler for FlasherApp {
             }
 
             WindowEvent::RedrawRequested => {
-                let Some(ref state) = self.wgpu_state else { return };
-                let Some(ref mut platform) = self.platform else { return };
-                let Some(ref mut renderer) = self.renderer else { return };
+                if self.wgpu_state.is_none() {
+                    window.request_redraw();
+                    return;
+                }
+                let state = self.wgpu_state.as_ref().unwrap();
+                let platform = self.platform.as_mut().unwrap();
+                let renderer = self.renderer.as_mut().unwrap();
 
                 self.imgui.io_mut().update_delta_time(self.last_frame.elapsed());
                 self.last_frame = Instant::now();
@@ -239,6 +243,10 @@ impl ApplicationHandler for FlasherApp {
                 let surface_texture = match current {
                     wgpu::CurrentSurfaceTexture::Success(t) => t,
                     wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    wgpu::CurrentSurfaceTexture::Timeout => {
+                        window.request_redraw();
+                        return;
+                    }
                     _ => return,
                 };
 
