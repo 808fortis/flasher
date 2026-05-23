@@ -195,30 +195,28 @@ impl ApplicationHandler for FlasherApp {
                 }
             }
 
-            WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Left {
-                    match state {
-                        ElementState::Pressed => {
-                            let win_w = window.inner_size().width as f64;
-                            let win_h = window.inner_size().height as f64;
-                            if let Some(edge) = DragState::cursor_for_edge(win_w, win_h, self.cursor_pos.0, self.cursor_pos.1) {
-                                self.drag = edge;
-                            } else {
-                                self.drag = DragState {
-                                    active: true,
-                                    start_x: self.cursor_pos.0,
-                                    start_y: self.cursor_pos.1,
-                                    win_start_w: window.inner_size().width,
-                                    win_start_h: window.inner_size().height,
-                                    win_start_x: window.outer_position().unwrap_or(PhysicalPosition::new(0, 0)).x,
-                                    win_start_y: window.outer_position().unwrap_or(PhysicalPosition::new(0, 0)).y,
-                                    ..Default::default()
-                                };
-                            }
+            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+                match state {
+                    ElementState::Pressed => {
+                        let win_w = window.inner_size().width as f64;
+                        let win_h = window.inner_size().height as f64;
+                        if let Some(edge) = DragState::cursor_for_edge(win_w, win_h, self.cursor_pos.0, self.cursor_pos.1) {
+                            self.drag = edge;
+                        } else {
+                            self.drag = DragState {
+                                active: true,
+                                start_x: self.cursor_pos.0,
+                                start_y: self.cursor_pos.1,
+                                win_start_w: window.inner_size().width,
+                                win_start_h: window.inner_size().height,
+                                win_start_x: window.outer_position().unwrap_or(PhysicalPosition::new(0, 0)).x,
+                                win_start_y: window.outer_position().unwrap_or(PhysicalPosition::new(0, 0)).y,
+                                ..Default::default()
+                            };
                         }
-                        ElementState::Released => {
-                            self.drag = DragState::default();
-                        }
+                    }
+                    ElementState::Released => {
+                        self.drag = DragState::default();
                     }
                 }
             }
