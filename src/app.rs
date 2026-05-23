@@ -10,6 +10,7 @@ use crate::scatter;
 #[derive(Clone, PartialEq)]
 enum SlotMode { A, B, Both }
 
+#[derive(Clone)]
 enum LogLevel { Info, Ok, Warn, Err }
 
 struct LogEntry {
@@ -32,7 +33,14 @@ fn spinner_char(t: Instant) -> &'static str {
     }
 }
 
-fn check_char() -> &'static str { "\u{2713}" }
+const BG_DARK: [f32; 4] = [0.11, 0.11, 0.13, 1.0];
+const BG_PANEL: [f32; 4] = [0.14, 0.14, 0.16, 1.0];
+const TEXT_MAIN: [f32; 4] = [0.85, 0.85, 0.88, 1.0];
+const TEXT_DIM: [f32; 4] = [0.50, 0.50, 0.55, 1.0];
+const ACCENT: [f32; 4] = [0.20, 0.60, 1.00, 1.0];
+const OK_GREEN: [f32; 4] = [0.10, 0.80, 0.30, 1.0];
+const WARN_YELLOW: [f32; 4] = [1.00, 0.80, 0.00, 1.0];
+const ERR_RED: [f32; 4] = [1.00, 0.25, 0.25, 1.0];
 
 pub struct App {
     scatter_path: Option<PathBuf>,
@@ -50,6 +58,7 @@ pub struct App {
     spinner: String,
     scatter_valid: bool,
     scatter_errors: Vec<String>,
+    scroll_log: bool,
 }
 
 impl App {
@@ -73,12 +82,14 @@ impl App {
             spinner: String::new(),
             scatter_valid: false,
             scatter_errors: Vec::new(),
+            scroll_log: false,
         }
     }
 
     fn add_log(&mut self, text: String, level: LogLevel) {
         if self.log.len() > 500 { self.log.remove(0); }
         self.log.push(LogEntry { text, level });
+        self.scroll_log = true;
     }
 
     #[allow(dead_code)]
@@ -87,6 +98,7 @@ impl App {
         for msg in flash_log.drain(..) {
             if self.log.len() > 500 { self.log.remove(0); }
             self.log.push(LogEntry { text: msg, level: LogLevel::Ok });
+            self.scroll_log = true;
         }
     }
 
@@ -244,12 +256,12 @@ impl App {
                 }
             }
 
-            flog(format!("{} flashed {}/{} partition", check_char(), success, total));
+            flog(format!("ok {}/{} partition", success, total));
             let _ = session.reboot();
             let mut p = progress.lock().unwrap();
             p.current = p.total; p.done = true;
             p.message = "done! device rebooting...".to_string();
-            p.text = format!("{} flashed {}/{} partitions", check_char(), success, total);
+            p.text = format!("ok {}/{} partitions", success, total);
             flog("done! device rebooting.".to_string());
         });
     }
@@ -265,105 +277,152 @@ impl App {
 
         self.spinner = spinner_char(Instant::now()).to_string();
 
+        let _colors = [
+            ui.push_style_color(StyleColor::WindowBg, BG_DARK),
+            ui.push_style_color(StyleColor::ChildBg, BG_PANEL),
+            ui.push_style_color(StyleColor::FrameBg, BG_DARK),
+            ui.push_style_color(StyleColor::Text, TEXT_MAIN),
+            ui.push_style_color(StyleColor::TextDisabled, TEXT_DIM),
+            ui.push_style_color(StyleColor::Button, [0.18, 0.18, 0.22, 1.0]),
+            ui.push_style_color(StyleColor::ButtonHovered, ACCENT),
+            ui.push_style_color(StyleColor::Header, ACCENT),
+            ui.push_style_color(StyleColor::Border, [0.20, 0.20, 0.25, 1.0]),
+            ui.push_style_color(StyleColor::ScrollbarGrab, ACCENT),
+        ];
+
         ui.window("flasher")
             .no_decoration()
             .flags(WindowFlags::NO_MOVE | WindowFlags::NO_COLLAPSE | WindowFlags::NO_SCROLLBAR)
             .size([win_w, win_h], Condition::Always)
             .position([0.0, 0.0], Condition::Always)
             .build(|| {
-                self.draw_toolbar(ui);
+                self.draw_topbar(ui, win_w);
                 ui.separator();
                 let avail = ui.content_region_avail();
-                let log_w = (avail[0] * 0.3).max(200.0);
-                let table_w = avail[0] - log_w - 8.0;
-                let height = (avail[1] - 60.0).max(100.0);
-                self.draw_log(ui, log_w, height);
+                let table_w = (avail[0] * 0.55).max(280.0);
+                let log_w = avail[0] - table_w - 8.0;
+                let mid_h = (avail[1] - 50.0).max(100.0);
+                self.draw_table(ui, table_w, mid_h);
                 ui.same_line();
-                self.draw_table(ui, table_w, height);
+                self.draw_log(ui, log_w, mid_h);
                 ui.separator();
-                self.draw_bottom(ui);
+                self.draw_bottombar(ui, win_w);
             });
     }
 
-    fn draw_toolbar(&self, ui: &Ui) {
-        ui.text_colored([0.2, 0.6, 1.0, 1.0], "flasher");
-        ui.same_line();
-        let dev_text = if self.device_connected {
-            format!("device: {} ({})", self.device_serial, self.device_model)
+    fn draw_topbar(&mut self, ui: &Ui, _w: f32) {
+        ui.text_colored(ACCENT, "flasher");
+        ui.same_line_with_spacing(0.0, 12.0);
+        ui.text_colored(TEXT_DIM, "v0.1");
+
+        ui.same_line_with_spacing(0.0, 24.0);
+
+        let status = if self.device_connected {
+            format!("{} ({})", self.device_serial, self.device_model)
         } else {
             "no device".to_string()
         };
-        let col = if self.device_connected { [0.0, 1.0, 0.0, 1.0] } else { [0.5, 0.5, 0.5, 1.0] };
-        ui.text_colored(col, dev_text);
+        let status_col = if self.device_connected { OK_GREEN } else { TEXT_DIM };
+        ui.text_colored(TEXT_DIM, "device:");
+        ui.same_line();
+        ui.text_colored(status_col, &status);
+
+        ui.same_line_with_spacing(0.0, 16.0);
+        let slot_name = match self.slot_mode {
+            SlotMode::A => "a", SlotMode::B => "b", SlotMode::Both => "both",
+        };
+        ui.text_colored(TEXT_DIM, "slot:");
+        ui.same_line();
+        ui.text_colored(ACCENT, slot_name);
+
+        if let Some(ref path) = self.scatter_path {
+            let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+            ui.same_line_with_spacing(0.0, 16.0);
+            ui.text_colored(TEXT_DIM, "scatter:");
+            ui.same_line();
+            ui.text_colored(TEXT_MAIN, &*name);
+        }
     }
 
     fn draw_log(&mut self, ui: &Ui, w: f32, h: f32) {
-        ui.child_window("log").size([w, h]).border(true).build(|| {
-            ui.text_colored([0.5, 0.5, 0.5, 1.0], "[ output ]");
-            ui.separator();
-            for entry in &self.log {
-                let col = match entry.level {
-                    LogLevel::Info => [0.7, 0.7, 0.7, 1.0],
-                    LogLevel::Ok => [0.0, 1.0, 0.0, 1.0],
-                    LogLevel::Warn => [1.0, 0.8, 0.0, 1.0],
-                    LogLevel::Err => [1.0, 0.2, 0.2, 1.0],
-                };
-                ui.text_colored(col, &entry.text);
-            }
-            ui.set_scroll_here_y();
-        });
+        ui.child_window("log")
+            .size([w, h])
+            .border(true)
+            .scroll_bar(true)
+            .build(|| {
+                ui.text_colored(TEXT_DIM, "log");
+                ui.separator();
+                for entry in &self.log {
+                    let col = match entry.level {
+                        LogLevel::Info => TEXT_MAIN,
+                        LogLevel::Ok => OK_GREEN,
+                        LogLevel::Warn => WARN_YELLOW,
+                        LogLevel::Err => ERR_RED,
+                    };
+                    ui.text_colored(col, &entry.text);
+                }
+                if self.scroll_log {
+                    ui.set_scroll_here_y();
+                    self.scroll_log = false;
+                }
+            });
     }
 
     fn draw_table(&mut self, ui: &Ui, w: f32, h: f32) {
-        ui.child_window("parts").size([w, h]).border(true).build(|| {
-            ui.text_colored([0.5, 0.5, 0.5, 1.0], "[ partitions ]");
-            ui.separator();
+        ui.child_window("parts")
+            .size([w, h])
+            .border(true)
+            .scroll_bar(true)
+            .build(|| {
+                ui.text_colored(TEXT_DIM, "partitions");
+                ui.separator();
 
-            if self.partitions.is_empty() {
-                ui.text_disabled("drop scatter file or click load below");
-            } else {
-                if !self.scatter_valid {
-                    ui.text_colored([1.0, 0.8, 0.0, 1.0], "scatter has warnings");
-                    if !self.scatter_errors.is_empty() {
+                if self.partitions.is_empty() {
+                    ui.text_disabled("drop scatter file or click load");
+                } else {
+                    if !self.scatter_valid {
+                        ui.text_colored(WARN_YELLOW, "scatter has warnings");
                         for e in &self.scatter_errors {
-                            ui.text_colored([1.0, 0.4, 0.0, 1.0], e);
+                            ui.text_colored(WARN_YELLOW, e);
+                        }
+                        ui.separator();
+                    }
+
+                    let all_enabled = self.partitions.iter().all(|p| p.enabled);
+                    let mut all = all_enabled;
+                    if ui.checkbox("all", &mut all) {
+                        for p in &mut self.partitions { p.enabled = all; }
+                    }
+                    ui.same_line_with_spacing(0.0, 8.0);
+                    let enabled_count = self.partitions.iter().filter(|p| p.enabled).count();
+                    ui.text_disabled(format!("{}/{} selected", enabled_count, self.partitions.len()));
+
+                    let flags = TableFlags::SCROLL_Y | TableFlags::RESIZABLE
+                        | TableFlags::BORDERS_INNER_V | TableFlags::BORDERS_OUTER_V;
+                    if let Some(_t) = ui.begin_table_header_with_sizing("tbl", [
+                        TableColumnSetup::new("on"),
+                        TableColumnSetup::new("partition"),
+                        TableColumnSetup::new("size"),
+                        TableColumnSetup::new("addr"),
+                    ], flags, [w - 16.0, h - 80.0], 0.0) {
+                        for p in &mut self.partitions {
+                            ui.table_next_row();
+                            ui.table_set_column_index(0);
+                            ui.checkbox(format!("##{}", p.name), &mut p.enabled);
+                            ui.table_set_column_index(1);
+                            ui.text(&p.name);
+                            ui.table_set_column_index(2);
+                            ui.text(format!("{:.1} mb", p.partition_size as f64 / 1048576.0));
+                            ui.table_set_column_index(3);
+                            ui.text(format!("0x{:x}", p.linear_start_addr));
                         }
                     }
-                    ui.separator();
                 }
-
-                let all_enabled = self.partitions.iter().all(|p| p.enabled);
-                let mut all = all_enabled;
-                if ui.checkbox("all", &mut all) {
-                    for p in &mut self.partitions { p.enabled = all; }
-                }
-
-                let flags = TableFlags::SCROLL_Y | TableFlags::RESIZABLE
-                    | TableFlags::BORDERS_INNER_V | TableFlags::BORDERS_OUTER_V;
-                if let Some(_t) = ui.begin_table_header_with_sizing("tbl", [
-                    TableColumnSetup::new("on"),
-                    TableColumnSetup::new("partition"),
-                    TableColumnSetup::new("size"),
-                    TableColumnSetup::new("address"),
-                ], flags, [w, h - 80.0], 0.0) {
-                    for p in &mut self.partitions {
-                        ui.table_next_row();
-                        ui.table_set_column_index(0);
-                        ui.checkbox(format!("##{}", p.name), &mut p.enabled);
-                        ui.table_set_column_index(1);
-                        ui.text(&p.name);
-                        ui.table_set_column_index(2);
-                        ui.text(format!("{:.1} mb", p.partition_size as f64 / 1048576.0));
-                        ui.table_set_column_index(3);
-                        ui.text(format!("0x{:x}", p.linear_start_addr));
-                    }
-                }
-            }
-        });
+            });
     }
 
-    fn draw_bottom(&mut self, ui: &Ui) {
-        if ui.button_with_size("load scatter", [120.0, 24.0]) {
+    fn draw_bottombar(&mut self, ui: &Ui, _w: f32) {
+        if ui.button_with_size("load scatter", [120.0, 26.0]) {
             let pending = self.pending_load.clone();
             thread::spawn(move || {
                 if let Some(path) = rfd::FileDialog::new().add_filter("scatter", &["txt", "scatter", "xml"]).pick_file() {
@@ -372,8 +431,9 @@ impl App {
             });
         }
 
-        ui.same_line();
-        ui.text("slot:");
+        ui.same_line_with_spacing(0.0, 16.0);
+
+        ui.text_colored(TEXT_DIM, "slot");
         ui.same_line();
         if ui.radio_button_bool("a", self.slot_mode == SlotMode::A) { self.slot_mode = SlotMode::A; }
         ui.same_line();
@@ -381,17 +441,18 @@ impl App {
         ui.same_line();
         if ui.radio_button_bool("both", self.slot_mode == SlotMode::Both) { self.slot_mode = SlotMode::Both; }
 
-        ui.same_line();
+        ui.same_line_with_spacing(0.0, 16.0);
+
         let can_flash = !self.flashing && self.device_connected && !self.partitions.is_empty()
             && self.partitions.iter().any(|p| p.enabled);
-        if can_flash && ui.button_with_size("flash", [100.0, 24.0]) {
+        if can_flash && ui.button_with_size("flash", [100.0, 26.0]) {
             self.add_log("initializing flash sequence...".to_string(), LogLevel::Info);
             self.start_flash();
         }
 
         let prog = self.progress.lock().unwrap();
         if !prog.done || prog.total > 0 || !prog.text.is_empty() {
-            ui.same_line();
+            ui.same_line_with_spacing(0.0, 12.0);
             let frac = if prog.total > 0 { prog.current as f32 / prog.total as f32 } else { 0.0 };
             let overlay = if prog.done && prog.total > 0 {
                 format!("{} {}/{} {}", self.spinner, prog.current, prog.total, prog.text)
@@ -400,11 +461,14 @@ impl App {
             } else {
                 prog.message.clone()
             };
-            ProgressBar::new(frac).overlay_text(&overlay).size([250.0, 20.0]).build(ui);
+            ProgressBar::new(frac)
+                .overlay_text(&overlay)
+                .size([200.0, 20.0])
+                .build(ui);
         }
         if let Some(ref err) = prog.error {
             ui.same_line();
-            ui.text_colored([1.0, 0.2, 0.2, 1.0], err);
+            ui.text_colored(ERR_RED, err);
         }
         drop(prog);
     }
