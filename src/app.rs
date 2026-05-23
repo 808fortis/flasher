@@ -10,7 +10,6 @@ use crate::scatter;
 #[derive(Clone, PartialEq)]
 enum SlotMode { A, B, Both }
 
-#[derive(Clone)]
 enum LogLevel { Info, Ok, Warn, Err }
 
 struct LogEntry {
@@ -266,7 +265,7 @@ impl App {
         });
     }
 
-    pub fn render(&mut self, ui: &Ui, _win_w: f32, _win_h: f32) {
+    pub fn render(&mut self, ui: &Ui, win_w: f32, win_h: f32) {
         if self.last_scan.elapsed() >= Duration::from_secs(2) {
             self.scan_devices();
             self.last_scan = Instant::now();
@@ -290,138 +289,173 @@ impl App {
             ui.push_style_color(StyleColor::ScrollbarGrab, ACCENT),
         ];
 
-        ui.window("partitions")
-            .size([520.0, 400.0], Condition::FirstUseEver)
-            .position([20.0, 30.0], Condition::FirstUseEver)
+        ui.window("flasher")
+            .size([win_w, win_h], Condition::Always)
+            .position([0.0, 0.0], Condition::Always)
+            .movable(false)
+            .resizable(false)
+            .collapsible(false)
+            .flags(WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS | WindowFlags::NO_NAV_FOCUS)
             .build(|| {
-                if self.partitions.is_empty() {
-                    ui.text_disabled("drop scatter file or click load below");
-                } else {
-                    if !self.scatter_valid {
-                        ui.text_colored(WARN_YELLOW, "scatter has warnings");
-                        for e in &self.scatter_errors {
-                            ui.text_colored(WARN_YELLOW, e);
-                        }
-                        ui.separator();
-                    }
-
-                    let all_enabled = self.partitions.iter().all(|p| p.enabled);
-                    let mut all = all_enabled;
-                    if ui.checkbox("all", &mut all) {
-                        for p in &mut self.partitions { p.enabled = all; }
-                    }
-                    ui.same_line_with_spacing(0.0, 8.0);
-                    ui.text_disabled(format!("{}/{}",
-                        self.partitions.iter().filter(|p| p.enabled).count(),
-                        self.partitions.len()));
-
-                    let flags = TableFlags::SCROLL_Y | TableFlags::RESIZABLE
-                        | TableFlags::BORDERS_INNER_V | TableFlags::BORDERS_OUTER_V;
-                    if let Some(_t) = ui.begin_table_header_with_sizing("tbl", [
-                        TableColumnSetup::new("on"),
-                        TableColumnSetup::new("partition"),
-                        TableColumnSetup::new("size"),
-                        TableColumnSetup::new("addr"),
-                    ], flags, [0.0, 0.0], 0.0) {
-                        for p in &mut self.partitions {
-                            ui.table_next_row();
-                            ui.table_set_column_index(0);
-                            ui.checkbox(format!("##{}", p.name), &mut p.enabled);
-                            ui.table_set_column_index(1);
-                            ui.text(&p.name);
-                            ui.table_set_column_index(2);
-                            ui.text(format!("{:.1} mb", p.partition_size as f64 / 1048576.0));
-                            ui.table_set_column_index(3);
-                            ui.text(format!("0x{:x}", p.linear_start_addr));
-                        }
-                    }
-                }
-            });
-
-        ui.window("log")
-            .size([400.0, 300.0], Condition::FirstUseEver)
-            .position([560.0, 30.0], Condition::FirstUseEver)
-            .build(|| {
-                for entry in &self.log {
-                    let col = match entry.level {
-                        LogLevel::Info => TEXT_MAIN,
-                        LogLevel::Ok => OK_GREEN,
-                        LogLevel::Warn => WARN_YELLOW,
-                        LogLevel::Err => ERR_RED,
-                    };
-                    ui.text_colored(col, &entry.text);
-                }
-                if self.scroll_log {
-                    ui.set_scroll_here_y();
-                    self.scroll_log = false;
-                }
-            });
-
-        ui.window("controls")
-            .size([520.0, 100.0], Condition::FirstUseEver)
-            .position([20.0, 440.0], Condition::FirstUseEver)
-            .build(|| {
-                let status = if self.device_connected {
-                    format!("{} ({})", self.device_serial, self.device_model)
-                } else {
-                    "no device".to_string()
-                };
-                ui.text_colored(TEXT_DIM, "device:");
-                ui.same_line();
-                let status_col = if self.device_connected { OK_GREEN } else { TEXT_DIM };
-                ui.text_colored(status_col, &status);
-
-                ui.same_line_with_spacing(0.0, 24.0);
-
-                ui.text_colored(TEXT_DIM, "slot:");
-                ui.same_line();
-                if ui.radio_button_bool("a", self.slot_mode == SlotMode::A) { self.slot_mode = SlotMode::A; }
-                ui.same_line();
-                if ui.radio_button_bool("b", self.slot_mode == SlotMode::B) { self.slot_mode = SlotMode::B; }
-                ui.same_line();
-                if ui.radio_button_bool("both", self.slot_mode == SlotMode::Both) { self.slot_mode = SlotMode::Both; }
-
+                self.draw_toolbar(ui);
                 ui.separator();
-
-                if ui.button_with_size("load scatter", [120.0, 26.0]) {
-                    let pending = self.pending_load.clone();
-                    thread::spawn(move || {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("scatter", &["txt", "scatter", "xml"]).pick_file() {
-                            *pending.lock().unwrap() = Some(path);
-                        }
-                    });
-                }
-
-                ui.same_line_with_spacing(0.0, 12.0);
-
-                let can_flash = !self.flashing && self.device_connected && !self.partitions.is_empty()
-                    && self.partitions.iter().any(|p| p.enabled);
-                if can_flash && ui.button_with_size("flash", [100.0, 26.0]) {
-                    self.add_log("initializing flash sequence...".to_string(), LogLevel::Info);
-                    self.start_flash();
-                }
-
-                let prog = self.progress.lock().unwrap();
-                if !prog.done || prog.total > 0 || !prog.text.is_empty() {
-                    ui.same_line_with_spacing(0.0, 12.0);
-                    let frac = if prog.total > 0 { prog.current as f32 / prog.total as f32 } else { 0.0 };
-                    let overlay = if prog.done && prog.total > 0 {
-                        format!("{} {}/{} {}", self.spinner, prog.current, prog.total, prog.text)
-                    } else if !prog.done && prog.total > 0 {
-                        format!("{} {}/{} {}", self.spinner, prog.current, prog.total, prog.message)
-                    } else {
-                        prog.message.clone()
-                    };
-                    ProgressBar::new(frac)
-                        .overlay_text(&overlay)
-                        .size([200.0, 20.0])
-                        .build(ui);
-                }
-                if let Some(ref err) = prog.error {
-                    ui.same_line();
-                    ui.text_colored(ERR_RED, err);
-                }
-                drop(prog);
+                let avail = ui.content_region_avail();
+                let table_w = (avail[0] * 0.55).max(280.0);
+                let log_w = avail[0] - table_w - 8.0;
+                let mid_h = (avail[1] - 44.0).max(100.0);
+                self.draw_table(ui, table_w, mid_h);
+                ui.same_line();
+                self.draw_log(ui, log_w, mid_h);
+                ui.separator();
+                self.draw_bottombar(ui);
             });
+    }
+
+    fn draw_toolbar(&self, ui: &Ui) {
+        ui.text_colored(ACCENT, "flasher");
+        ui.same_line_with_spacing(0.0, 12.0);
+        ui.text_colored(TEXT_DIM, "v0.1");
+
+        ui.same_line_with_spacing(0.0, 24.0);
+
+        let status = if self.device_connected {
+            format!("{} ({})", self.device_serial, self.device_model)
+        } else {
+            "no device".to_string()
+        };
+        ui.text_colored(TEXT_DIM, "device:");
+        ui.same_line();
+        let status_col = if self.device_connected { OK_GREEN } else { TEXT_DIM };
+        ui.text_colored(status_col, &status);
+
+        if let Some(ref path) = self.scatter_path {
+            let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+            ui.same_line_with_spacing(0.0, 16.0);
+            ui.text_colored(TEXT_DIM, "scatter:");
+            ui.same_line();
+            ui.text_colored(TEXT_MAIN, &*name);
+        }
+    }
+
+    fn draw_log(&mut self, ui: &Ui, w: f32, h: f32) {
+        ui.child_window("log").size([w, h]).border(true).build(|| {
+            ui.text_colored(TEXT_DIM, "log");
+            ui.separator();
+            for entry in &self.log {
+                let col = match entry.level {
+                    LogLevel::Info => TEXT_MAIN,
+                    LogLevel::Ok => OK_GREEN,
+                    LogLevel::Warn => WARN_YELLOW,
+                    LogLevel::Err => ERR_RED,
+                };
+                ui.text_colored(col, &entry.text);
+            }
+            if self.scroll_log {
+                ui.set_scroll_here_y();
+                self.scroll_log = false;
+            }
+        });
+    }
+
+    fn draw_table(&mut self, ui: &Ui, w: f32, h: f32) {
+        ui.child_window("parts").size([w, h]).border(true).build(|| {
+            ui.text_colored(TEXT_DIM, "partitions");
+            ui.separator();
+
+            if self.partitions.is_empty() {
+                ui.text_disabled("drop scatter file or click load below");
+            } else {
+                if !self.scatter_valid {
+                    ui.text_colored(WARN_YELLOW, "scatter has warnings");
+                    for e in &self.scatter_errors {
+                        ui.text_colored(WARN_YELLOW, e);
+                    }
+                    ui.separator();
+                }
+
+                let all_enabled = self.partitions.iter().all(|p| p.enabled);
+                let mut all = all_enabled;
+                if ui.checkbox("all", &mut all) {
+                    for p in &mut self.partitions { p.enabled = all; }
+                }
+                ui.same_line_with_spacing(0.0, 8.0);
+                ui.text_disabled(format!("{}/{}",
+                    self.partitions.iter().filter(|p| p.enabled).count(),
+                    self.partitions.len()));
+
+                let flags = TableFlags::SCROLL_Y | TableFlags::RESIZABLE
+                    | TableFlags::BORDERS_INNER_V | TableFlags::BORDERS_OUTER_V;
+                if let Some(_t) = ui.begin_table_header_with_sizing("tbl", [
+                    TableColumnSetup::new("on"),
+                    TableColumnSetup::new("partition"),
+                    TableColumnSetup::new("size"),
+                    TableColumnSetup::new("addr"),
+                ], flags, [w - 16.0, h - 80.0], 0.0) {
+                    for p in &mut self.partitions {
+                        ui.table_next_row();
+                        ui.table_set_column_index(0);
+                        ui.checkbox(format!("##{}", p.name), &mut p.enabled);
+                        ui.table_set_column_index(1);
+                        ui.text(&p.name);
+                        ui.table_set_column_index(2);
+                        ui.text(format!("{:.1} mb", p.partition_size as f64 / 1048576.0));
+                        ui.table_set_column_index(3);
+                        ui.text(format!("0x{:x}", p.linear_start_addr));
+                    }
+                }
+            }
+        });
+    }
+
+    fn draw_bottombar(&mut self, ui: &Ui) {
+        if ui.button_with_size("load scatter", [120.0, 26.0]) {
+            let pending = self.pending_load.clone();
+            thread::spawn(move || {
+                if let Some(path) = rfd::FileDialog::new().add_filter("scatter", &["txt", "scatter", "xml"]).pick_file() {
+                    *pending.lock().unwrap() = Some(path);
+                }
+            });
+        }
+
+        ui.same_line_with_spacing(0.0, 16.0);
+
+        ui.text_colored(TEXT_DIM, "slot");
+        ui.same_line();
+        if ui.radio_button_bool("a", self.slot_mode == SlotMode::A) { self.slot_mode = SlotMode::A; }
+        ui.same_line();
+        if ui.radio_button_bool("b", self.slot_mode == SlotMode::B) { self.slot_mode = SlotMode::B; }
+        ui.same_line();
+        if ui.radio_button_bool("both", self.slot_mode == SlotMode::Both) { self.slot_mode = SlotMode::Both; }
+
+        ui.same_line_with_spacing(0.0, 16.0);
+
+        let can_flash = !self.flashing && self.device_connected && !self.partitions.is_empty()
+            && self.partitions.iter().any(|p| p.enabled);
+        if can_flash && ui.button_with_size("flash", [100.0, 26.0]) {
+            self.add_log("initializing flash sequence...".to_string(), LogLevel::Info);
+            self.start_flash();
+        }
+
+        let prog = self.progress.lock().unwrap();
+        if !prog.done || prog.total > 0 || !prog.text.is_empty() {
+            ui.same_line_with_spacing(0.0, 12.0);
+            let frac = if prog.total > 0 { prog.current as f32 / prog.total as f32 } else { 0.0 };
+            let overlay = if prog.done && prog.total > 0 {
+                format!("{} {}/{} {}", self.spinner, prog.current, prog.total, prog.text)
+            } else if !prog.done && prog.total > 0 {
+                format!("{} {}/{} {}", self.spinner, prog.current, prog.total, prog.message)
+            } else {
+                prog.message.clone()
+            };
+            ProgressBar::new(frac)
+                .overlay_text(&overlay)
+                .size([200.0, 20.0])
+                .build(ui);
+        }
+        if let Some(ref err) = prog.error {
+            ui.same_line();
+            ui.text_colored(ERR_RED, err);
+        }
+        drop(prog);
     }
 }

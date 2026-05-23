@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
-    event::{ElementState, Event, MouseButton, WindowEvent},
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
@@ -17,46 +17,8 @@ use imgui_winit_support::{WinitPlatform, HiDpiMode};
 
 use crate::app::App;
 
-const EDGE_THICKNESS: f64 = 6.0;
-const MIN_W: u32 = 640;
-const MIN_H: u32 = 480;
-
-#[derive(Default)]
-struct DragState {
-    active: bool,
-    start_x: f64,
-    start_y: f64,
-    win_start_w: u32,
-    win_start_h: u32,
-    win_start_x: i32,
-    win_start_y: i32,
-    resize_left: bool,
-    resize_right: bool,
-    resize_top: bool,
-    resize_bottom: bool,
-}
-
-impl DragState {
-    fn is_resize(&self) -> bool {
-        self.resize_left || self.resize_right || self.resize_top || self.resize_bottom
-    }
-
-    fn cursor_for_edge(window_w: f64, window_h: f64, cx: f64, cy: f64) -> Option<DragState> {
-        let on_left = cx < EDGE_THICKNESS;
-        let on_right = cx > window_w - EDGE_THICKNESS;
-        let on_top = cy < EDGE_THICKNESS;
-        let on_bottom = cy > window_h - EDGE_THICKNESS;
-
-        if !on_left && !on_right && !on_top && !on_bottom {
-            return None;
-        }
-        Some(DragState {
-            resize_left: on_left, resize_right: on_right,
-            resize_top: on_top, resize_bottom: on_bottom,
-            ..Default::default()
-        })
-    }
-}
+const MIN_W: u32 = 800;
+const MIN_H: u32 = 500;
 
 struct WgpuState {
     device: wgpu::Device,
@@ -95,9 +57,7 @@ struct FlasherApp {
     platform: Option<WinitPlatform>,
     renderer: Option<imgui_wgpu::Renderer>,
     app_state: App,
-    drag: DragState,
     last_frame: Instant,
-    cursor_pos: (f64, f64),
     init_attempted: bool,
 }
 
@@ -110,9 +70,7 @@ impl FlasherApp {
             platform: None,
             renderer: None,
             app_state: App::new(),
-            drag: DragState::default(),
             last_frame: Instant::now(),
-            cursor_pos: (0.0, 0.0),
             init_attempted: false,
         }
     }
@@ -122,7 +80,6 @@ impl FlasherApp {
     fn init_wgpu(&mut self, el: &ActiveEventLoop) {
         let win = match el.create_window(
             Window::default_attributes()
-                .with_decorations(false)
                 .with_resizable(true)
                 .with_inner_size(LogicalSize::new(980.0, 680.0))
                 .with_min_inner_size(LogicalSize::new(MIN_W as f64, MIN_H as f64))
@@ -173,73 +130,6 @@ impl ApplicationHandler for FlasherApp {
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::DroppedFile(path) => self.app_state.load_scatter(&path),
-
-            WindowEvent::CursorMoved { position, .. } => {
-                self.cursor_pos = (position.x, position.y);
-
-                if self.drag.active {
-                    let dx = self.cursor_pos.0 - self.drag.start_x;
-                    let dy = self.cursor_pos.1 - self.drag.start_y;
-
-                    if self.drag.is_resize() {
-                        let mut new_w = self.drag.win_start_w as f64;
-                        let mut new_h = self.drag.win_start_h as f64;
-                        let mut new_x = self.drag.win_start_x as f64;
-                        let mut new_y = self.drag.win_start_y as f64;
-
-                        if self.drag.resize_left {
-                            new_w -= dx;
-                            new_x += dx;
-                        } else if self.drag.resize_right {
-                            new_w += dx;
-                        }
-                        if self.drag.resize_top {
-                            new_h -= dy;
-                            new_y += dy;
-                        } else if self.drag.resize_bottom {
-                            new_h += dy;
-                        }
-
-                        let new_w = new_w.max(MIN_W as f64) as u32;
-                        let new_h = new_h.max(MIN_H as f64) as u32;
-                        let _ = window.request_inner_size(PhysicalSize::new(new_w, new_h));
-                        window.set_outer_position(PhysicalPosition::new(new_x as i32, new_y as i32));
-                    } else {
-                        let pos = window.outer_position().unwrap();
-                        window.set_outer_position(PhysicalPosition::new(
-                            pos.x + dx as i32, pos.y + dy as i32,
-                        ));
-                        self.drag.start_x = self.cursor_pos.0;
-                        self.drag.start_y = self.cursor_pos.1;
-                    }
-                }
-            }
-
-            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
-                match state {
-                    ElementState::Pressed => {
-                        let win_w = window.inner_size().width as f64;
-                        let win_h = window.inner_size().height as f64;
-                        if let Some(edge) = DragState::cursor_for_edge(win_w, win_h, self.cursor_pos.0, self.cursor_pos.1) {
-                            self.drag = edge;
-                        } else {
-                            self.drag = DragState {
-                                active: true,
-                                start_x: self.cursor_pos.0,
-                                start_y: self.cursor_pos.1,
-                                win_start_w: window.inner_size().width,
-                                win_start_h: window.inner_size().height,
-                                win_start_x: window.outer_position().unwrap_or(PhysicalPosition::new(0, 0)).x,
-                                win_start_y: window.outer_position().unwrap_or(PhysicalPosition::new(0, 0)).y,
-                                ..Default::default()
-                            };
-                        }
-                    }
-                    ElementState::Released => {
-                        self.drag = DragState::default();
-                    }
-                }
-            }
 
             WindowEvent::RedrawRequested => {
                 if self.wgpu_state.is_none() {
