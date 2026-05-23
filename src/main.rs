@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 mod app;
 mod fastboot;
 mod scatter;
@@ -64,19 +66,19 @@ struct WgpuState {
 }
 
 impl WgpuState {
-    async fn new(instance: &wgpu::Instance, arc_win: &Arc<Window>) -> Self {
+    async fn new(instance: &wgpu::Instance, arc_win: &Arc<Window>) -> Option<Self> {
         let size = arc_win.inner_size();
-        let surface = instance.create_surface(arc_win.clone()).unwrap();
+        let surface = instance.create_surface(arc_win.clone()).ok()?;
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }).await.unwrap();
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.unwrap();
-        let mut config = surface.get_default_config(&adapter, size.width, size.height).unwrap();
+            force_fallback_adapter: true,
+        }).await.ok()?;
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.ok()?;
+        let mut config = surface.get_default_config(&adapter, size.width, size.height)?;
         config.view_formats.push(config.format);
         surface.configure(&device, &config);
-        WgpuState { device, queue, surface, config }
+        Some(WgpuState { device, queue, surface, config })
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -127,7 +129,11 @@ impl ApplicationHandler for FlasherApp {
 
         let arc_win = Arc::new(win);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let state = pollster::block_on(WgpuState::new(&instance, &arc_win));
+        let Some(state) = pollster::block_on(WgpuState::new(&instance, &arc_win)) else {
+            eprintln!("failed to initialize wgpu");
+            el.exit();
+            return;
+        };
 
         let mut platform = WinitPlatform::new(&mut self.imgui);
         platform.attach_window(self.imgui.io_mut(), &arc_win, HiDpiMode::Default);
@@ -291,7 +297,30 @@ impl ApplicationHandler for FlasherApp {
 }
 
 fn main() {
-    let event_loop = EventLoop::new().unwrap();
+    std::panic::set_hook(Box::new(|info| {
+        let msg = info.to_string();
+        eprintln!("panic: {msg}");
+        let _ = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("flasher error")
+            .set_description(&msg)
+            .show();
+    }));
+
+    let event_loop = match EventLoop::new() {
+        Ok(el) => el,
+        Err(e) => {
+            eprintln!("failed to create event loop: {e}");
+            let _ = rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("flasher error")
+                .set_description(format!("failed to create event loop: {e}"))
+                .show();
+            return;
+        }
+    };
     let mut app = FlasherApp::new();
-    event_loop.run_app(&mut app).unwrap();
+    if let Err(e) = event_loop.run_app(&mut app) {
+        eprintln!("event loop error: {e}");
+    }
 }
