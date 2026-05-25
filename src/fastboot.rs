@@ -265,6 +265,10 @@ impl FastbootSession {
         self.command(&format!("erase:{}", partition)).map(|_| ())
     }
 
+    pub fn format(&self, partition: &str) -> Result<()> {
+        self.command(&format!("format:{}", partition)).map(|_| ())
+    }
+
     pub fn reboot(&self) -> Result<()> {
         self.send("reboot").ok();
         Ok(())

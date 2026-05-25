@@ -31,6 +31,8 @@ fn spinner_char(t: Instant) -> &'static str {
     }
 }
 
+const DATA_PARTITIONS: &[&str] = &["userdata", "cache", "metadata"];
+
 pub struct App {
     scatter_path: Option<PathBuf>,
     partitions: Vec<scatter::Partition>,
@@ -41,6 +43,8 @@ pub struct App {
     log: Vec<LogEntry>,
     progress: Arc<Mutex<Progress>>,
     flashing: bool,
+    formatting: bool,
+    show_format_confirm: bool,
     last_scan: Instant,
     flash_log: Arc<Mutex<Vec<String>>>,
     pending_load: Arc<Mutex<Option<PathBuf>>>,
@@ -65,6 +69,8 @@ impl App {
                 done: true, error: None,
             })),
             flashing: false,
+            formatting: false,
+            show_format_confirm: false,
             last_scan: Instant::now(),
             flash_log: Arc::new(Mutex::new(Vec::new())),
             pending_load: Arc::new(Mutex::new(None)),
@@ -254,6 +260,66 @@ impl App {
             flog("done! device rebooting.".to_string());
         });
     }
+
+    fn start_format_data(&mut self) {
+        let partitions: Vec<&str> = DATA_PARTITIONS.to_vec();
+        let progress = self.progress.clone();
+        let total = partitions.len();
+        let flash_log = self.flash_log.clone();
+
+        self.formatting = true;
+        self.add_log("formatting data partitions...".to_string(), LogLevel::Info);
+
+        {
+            let mut p = progress.lock().unwrap();
+            p.done = false; p.current = 0; p.total = total;
+            p.error = None; p.message = "formatting...".to_string(); p.text = String::new();
+        }
+
+        thread::spawn(move || {
+            let flog = |msg: String| { flash_log.lock().unwrap().push(msg); };
+
+            flog("connecting to fastboot device...".to_string());
+            let session = match fastboot::connect() {
+                Ok(s) => s,
+                Err(e) => {
+                    let mut p = progress.lock().unwrap();
+                    p.done = true; p.error = Some(format!("connection failed: {}", e));
+                    p.message = "failed".to_string();
+                    flog(format!("fail: {}", e));
+                    return;
+                }
+            };
+
+            let mut success = 0usize;
+            for (i, part) in partitions.iter().enumerate() {
+                {
+                    let mut p = progress.lock().unwrap();
+                    p.current = i + 1;
+                    p.message = format!("formatting {}...", part);
+                }
+
+                flog(format!("formatting {}...", part));
+                match session.format(part) {
+                    Ok(_) => {
+                        success += 1;
+                        flog(format!("ok: {}", part));
+                    }
+                    Err(e) => {
+                        flog(format!("skip: {} ({})", part, e));
+                    }
+                }
+            }
+
+            flog(format!("done. {} partitions formatted", success));
+            let _ = session.reboot();
+            let mut p = progress.lock().unwrap();
+            p.current = p.total; p.done = true;
+            p.message = "format complete! device rebooting...".to_string();
+            p.text = format!("ok {}/{} partitions", success, total);
+            flog("done! device rebooting.".to_string());
+        });
+    }
 }
 
 impl eframe::App for App {
@@ -302,6 +368,29 @@ impl eframe::App for App {
             });
         });
 
+        if self.show_format_confirm {
+            egui::Window::new("confirm format")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("this will format all data partitions");
+                    ui.label("(userdata, cache, metadata)");
+                    ui.label("all data will be lost!");
+                    ui.colored_label(egui::Color32::RED, "are you sure?");
+                    ui.horizontal(|ui| {
+                        if ui.button("yes, format").clicked() {
+                            self.show_format_confirm = false;
+                            self.add_log("formatting data partitions...".to_string(), LogLevel::Info);
+                            self.start_format_data();
+                        }
+                        if ui.button("cancel").clicked() {
+                            self.show_format_confirm = false;
+                        }
+                    });
+                });
+        }
+
         egui::TopBottomPanel::bottom("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("load scatter").clicked() {
@@ -322,11 +411,16 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                let can_flash = !self.flashing && self.device_connected && !self.partitions.is_empty()
+                let can_flash = !self.flashing && !self.formatting && self.device_connected && !self.partitions.is_empty()
                     && self.partitions.iter().any(|p| p.enabled);
                 if ui.add_enabled(can_flash, egui::Button::new("flash")).clicked() {
                     self.add_log("initializing flash sequence...".to_string(), LogLevel::Info);
                     self.start_flash();
+                }
+
+                let can_format = !self.formatting && !self.flashing && self.device_connected;
+                if ui.add_enabled(can_format, egui::Button::new("format data")).clicked() {
+                    self.show_format_confirm = true;
                 }
 
                 let prog = self.progress.lock().unwrap();
