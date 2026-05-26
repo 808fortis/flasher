@@ -158,7 +158,6 @@ fn parse_xml(path: &Path) -> Result<Scatter> {
     let mut current: HashMap<String, String> = HashMap::new();
 
     while i < len {
-        // skip comments
         if i + 3 < len && &bytes[i..i+4] == b"<!--" {
             in_comment = true;
             i += 4;
@@ -177,7 +176,6 @@ fn parse_xml(path: &Path) -> Result<Scatter> {
         if bytes[i] != b'<' { i += 1; continue; }
 
         if i + 1 < len && bytes[i + 1] == b'/' {
-            // closing tag
             let close = i + 2;
             let mut end = close;
             while end < len && bytes[end] != b'>' { end += 1; }
@@ -196,7 +194,6 @@ fn parse_xml(path: &Path) -> Result<Scatter> {
             continue;
         }
 
-        // opening or self-closing tag
         let mut close = i + 1;
         while close < len && bytes[close] != b'>' { close += 1; }
         if close >= len { break; }
@@ -211,7 +208,6 @@ fn parse_xml(path: &Path) -> Result<Scatter> {
         let name_end = tag_str.find(|c: char| c.is_whitespace()).unwrap_or(tag_str.len());
         let tag_name = tag_str[..name_end].to_lowercase();
 
-        // parse attributes
         let rest = tag_str[name_end..].trim();
         let mut attrs = HashMap::new();
         let mut pos = 0;

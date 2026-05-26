@@ -69,7 +69,6 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.tick();
 
-        // ── TOP BAR ──
         egui::TopBottomPanel::top("bar")
             .frame(Frame {
                 fill: Color32::from_rgb(20, 22, 28),
@@ -103,7 +102,6 @@ impl eframe::App for App {
                 });
             });
 
-        // ── CONFIRM FORMAT DIALOG ──
         if self.show_format_confirm {
             egui::Window::new("⚠ confirm format")
                 .collapsible(false)
@@ -133,7 +131,6 @@ impl eframe::App for App {
                 });
         }
 
-        // ── LEFT PANEL ──
         egui::SidePanel::left("panel_left")
             .resizable(true)
             .default_width(460.0)
@@ -250,7 +247,6 @@ impl eframe::App for App {
                 }
             });
 
-        // ── RIGHT PANEL: LOG ──
         egui::CentralPanel::default()
             .frame(Frame {
                 fill: Color32::from_rgb(16, 18, 22),
@@ -289,7 +285,6 @@ impl eframe::App for App {
                 }
             });
 
-        // ── BOTTOM BAR ──
         egui::TopBottomPanel::bottom("actions")
             .frame(Frame {
                 fill: Color32::from_rgb(20, 22, 28),
