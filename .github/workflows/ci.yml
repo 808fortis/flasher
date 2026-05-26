@@ -33,8 +33,8 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: flasher-${{ matrix.os }}
+        name: tss-helper-${{ matrix.os }}
         path: |
-          target/release/flasher
-          target/release/flasher.exe
+          target/release/tss-helper
+          target/release/tss-helper.exe
         if-no-files-found: warn
