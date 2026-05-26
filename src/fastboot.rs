@@ -138,6 +138,24 @@ pub fn get_device_model() -> Option<String> {
     session.getvar("product").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+pub fn get_device_manufacturer() -> Option<String> {
+    let session = connect().ok()?;
+    session.getvar("manufacturer").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+pub fn get_device_baseband() -> Option<String> {
+    let session = connect().ok()?;
+    session.getvar("version-baseband").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+pub fn is_transsion(manufacturer: &str) -> bool {
+    matches!(manufacturer.to_lowercase().as_str(), "infinix" | "tecno" | "itel")
+}
+
+pub fn is_mediatek(baseband: &str, product: &str) -> bool {
+    baseband.to_uppercase().contains("MOLY") || product.to_lowercase().contains("mt")
+}
+
 pub fn connect() -> Result<FastbootSession> {
     let list = rusb::DeviceList::new()?;
     for device in list.iter() {
@@ -272,6 +290,22 @@ impl FastbootSession {
     pub fn reboot(&self) -> Result<()> {
         self.send("reboot").ok();
         Ok(())
+    }
+
+    pub fn flashing_unlock(&self) -> Result<()> {
+        self.command("flashing unlock").map(|_| ())
+    }
+
+    pub fn flashing_unlock_critical(&self) -> Result<()> {
+        self.command("flashing unlock_critical").map(|_| ())
+    }
+
+    pub fn oem_unlock(&self) -> Result<()> {
+        self.command("oem unlock").map(|_| ())
+    }
+
+    pub fn reboot_bootloader(&self) -> Result<()> {
+        self.command("reboot-bootloader").map(|_| ())
     }
 
     #[allow(dead_code)]

@@ -1,7 +1,8 @@
 [package]
-name = "flasher"
-version = "0.1.0"
+name = "tss-helper"
+version = "1.0.0"
 edition = "2021"
+description = "Transsion Spreadtrum/Mediatek Fastboot Tool"
 
 [dependencies]
 eframe = "0.31"
